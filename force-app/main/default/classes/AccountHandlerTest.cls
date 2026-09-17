@@ -254,35 +254,39 @@ private class AccountHandlerTest {
 
     @isTest
     static void testBulkUpdateMultipleFields() {
-        // Create accounts with some missing Type and ShippingCity
+        // Industry left blank on insert so Type stays blank and can be populated on update
         List<Account> accounts = new List<Account>{
-            new Account(Name = 'Bulk Update 1', Industry = 'Technology', BillingCity = 'SF'),
-            new Account(Name = 'Bulk Update 2', Industry = 'Healthcare', BillingCity = 'NYC'),
-            new Account(Name = 'Bulk Update 3', Industry = 'Financial Services', BillingCity = 'Boston')
+            new Account(Name = 'Bulk Update 1', BillingCity = 'SF'),
+            new Account(Name = 'Bulk Update 2', BillingCity = 'NYC'),
+            new Account(Name = 'Bulk Update 3', BillingCity = 'Boston')
         };
-
         insert accounts;
 
-        // Now update with new Industry values
+        accounts[0].Industry = 'Technology';
+        accounts[1].Industry = 'Healthcare';
+        accounts[2].Industry = 'Financial Services';
         for (Account acc : accounts) {
-            acc.Industry = 'Technology'; // Change all to Tech
-            acc.BillingCity = 'Phoenix'; // Change all cities
+            acc.BillingCity = 'Phoenix';
         }
         update accounts;
 
-        Map<Id, Account> results = new Map<Id, Account>(
-            [SELECT Id, Type, ShippingCity FROM Account WHERE Id IN :accounts]
-        );
+        Map<Id, Account> results = new Map<Id, Account>([
+            SELECT Id, Type, ShippingCity FROM Account WHERE Id IN :accounts
+        ]);
 
-        for (Account result : results.values()) {
-            Assert.areEqual('Technology Partner', result.Type, 'Bulk update: Type should be Technology Partner');
-            Assert.areEqual('Phoenix', result.ShippingCity, 'Bulk update: ShippingCity should be Phoenix');
-        }
+        Assert.areEqual('Technology Partner', results.get(accounts[0].Id).Type);
+        Assert.areEqual('Healthcare Provider', results.get(accounts[1].Id).Type);
+        Assert.areEqual('Financial', results.get(accounts[2].Id).Type);
+
+        // ShippingCity was already synced on insert, so it stays unchanged despite the BillingCity update
+        Assert.areEqual('SF', results.get(accounts[0].Id).ShippingCity);
+        Assert.areEqual('NYC', results.get(accounts[1].Id).ShippingCity);
+        Assert.areEqual('Boston', results.get(accounts[2].Id).ShippingCity);
     }
+
 
     @isTest
     static void testBulkNoGovernorLimitViolation() {
-        // Create 200 accounts (near governor limit)
         List<Account> accounts = new List<Account>();
         for (Integer i = 0; i < 200; i++) {
             accounts.add(new Account(
@@ -291,21 +295,15 @@ private class AccountHandlerTest {
                 BillingCity = 'City ' + i
             ));
         }
-
         insert accounts;
 
-        // Verify all were processed
-        List<Account> results = [
-            SELECT Id, Type, ShippingCity
-            FROM Account
-            WHERE Name LIKE 'Governor Test %'
-        ];
-        Assert.areEqual(200, results.size(), 'All 200 accounts should be processed');
+        List<Account> results = [SELECT Id, Name, Type, ShippingCity FROM Account WHERE Name LIKE 'Governor Test %'];
+        Assert.areEqual(200, results.size());
 
-        // Verify no SOQL/DML in loop violations — handler should have bulk-safe patterns
         for (Account acc : results) {
             Assert.areEqual('Technology Partner', acc.Type);
-            Assert.areEqual('City ' + accounts.indexOf(acc), acc.ShippingCity);
+            String cityIndex = acc.Name.removeStart('Governor Test ');
+            Assert.areEqual('City ' + cityIndex, acc.ShippingCity);
         }
     }
 }
